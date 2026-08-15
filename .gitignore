@@ -31,3 +31,12 @@ LOG/
 # Collegamenti Windows (.lnk): puntano a percorsi assoluti della macchina
 # su cui sono stati creati, inutili/fuorvianti su un'altra macchina.
 *.lnk
+
+# Backup personali e materiale specifico del mio show (non fanno parte
+# del codice sorgente da distribuire).
+*.zip
+Cartello_QRcode_Show_Luci.pdf
+
+# Note di lavoro tra sessioni di sviluppo (contesto interno, non
+# documentazione per chi scarica il progetto - vedi README.md invece).
+02_SERVER_VOTO/HANDOFF_SESSIONE.md
