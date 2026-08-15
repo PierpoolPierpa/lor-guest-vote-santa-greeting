@@ -1,0 +1,33 @@
+# Configurazione personale (password admin, IP di rete, percorsi privati):
+# ogni utente crea la propria copia da CONFIGURAZIONE_SHOW.ini.example,
+# non deve mai finire nel repository.
+CONFIGURAZIONE_SHOW.ini
+
+# File generati automaticamente a runtime (log, cache Python, stato voti,
+# database storico): specifici di ogni singola installazione/serata, non
+# fanno parte del codice sorgente.
+LOG/
+**/__pycache__/
+*.pyc
+
+# Catalogo canzoni: generato da CostruisciCatalogo.py a partire dai FILE
+# AUDIO REALI di ogni utente (titoli/artisti diversi per ognuno) - non ha
+# senso distribuire il mio.
+02_SERVER_VOTO/catalogo_canzoni.json
+
+# Copertine album: spesso materiale coperto da copyright (locandine
+# ufficiali delle canzoni) - ogni utente mette le proprie.
+02_SERVER_VOTO/COPERTINE/*
+!02_SERVER_VOTO/COPERTINE/.gitkeep
+
+# Immagine/audio della pagina di Benvenuto e della pagina Beneficenza:
+# contenuto caricato da ogni utente per il proprio show, non un default
+# da distribuire.
+02_SERVER_VOTO/BENVENUTO/*
+!02_SERVER_VOTO/BENVENUTO/.gitkeep
+02_SERVER_VOTO/INFO/*
+!02_SERVER_VOTO/INFO/.gitkeep
+
+# Collegamenti Windows (.lnk): puntano a percorsi assoluti della macchina
+# su cui sono stati creati, inutili/fuorvianti su un'altra macchina.
+*.lnk

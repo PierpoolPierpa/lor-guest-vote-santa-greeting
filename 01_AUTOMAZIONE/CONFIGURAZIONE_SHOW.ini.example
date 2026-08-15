@@ -1,0 +1,82 @@
+# Copia questo file in "CONFIGURAZIONE_SHOW.ini" (stessa cartella, senza
+# ".example" alla fine) e compila i tuoi valori - quel file (non questo)
+# e' quello che i programmi leggono davvero, e resta sempre sul tuo PC,
+# mai caricato online.
+
+[RETE]
+# Facoltativo: usato SOLO da MotoreShow.py per verificare che un secondo
+# PC/portatile sia raggiungibile prima dello show. Se hai un solo PC,
+# lascia Verifica_Portatile = False qui sotto e ignora questa sezione.
+ip_master =
+ip_portatile =
+timeout_ping = 2
+tentativi_ping = 3
+
+[PERCORSI]
+# Dove tieni le sequenze/canzoni del tuo show (percorso relativo o assoluto).
+cartella_sequenze = ..\..\..\02_SEQUENZE
+cartella_log = LOG
+# Facoltativo, vedi il progetto "Schede Luci" (strumento separato).
+percorso_schede_luci =
+
+[ORARI]
+orario_accensione = 17:00
+orario_spegnimento = 21:00
+# 0=Lunedi ... 6=Domenica
+giorni_attivi = 0,1,2,3,4,5,6
+
+[OPZIONI]
+verifica_portatile = False
+
+[VOTO]
+# Nomi di cartelle canzoni da escludere dal voto (separate da virgola).
+cartelle_escluse =
+porta_server = 8080
+lingua_interfaccia = it
+# Password per vedere /risultati - scegline una tua, non lasciarla vuota
+# se il PC e' raggiungibile da altri sulla stessa rete.
+token_amministratore = cambiami
+modalita_coda = persistente
+tetto_coda = 5
+raffreddamento_tipo = turni
+raffreddamento_valore = 3
+
+[TRIGGER_LOR]
+abilita_controllo_lor = True
+porta_api_lor = 8001
+# Una riga per canzone: nome_cartella_canzone = TriggerLOR (Network-Unit-Input)
+# Si compila da solo usando "Carica da LOR" nella finestra Aggiungi/Modifica
+# canzone di ManagerShow - non serve scriverle qui a mano.
+
+[SEQUENZE_LOR]
+# Una riga per canzone: nome_cartella_canzone = Nome ESATTO sequenza in LOR
+# Stesso discorso di sopra, si compila da solo dalla GUI.
+
+[PULIZIA]
+abilita_pulizia = True
+minuti_anticipo = 15
+chiudi_chrome = True
+pulisci_file_temporanei = True
+programmi_extra =
+blocca_aggiornamenti_windows = True
+
+[BENVENUTO]
+# Tutto facoltativo - pagina che vedono gli ospiti per primo.
+testo =
+file_immagine =
+file_audio =
+colore_sfondo = #1e1e1e
+
+[SALUTO_BABBONATALE]
+# Funzione facoltativa (in sviluppo) - lascia False se non ti interessa.
+abilita = False
+
+[INFO]
+# Pagina Beneficenza facoltativa - vedi la Guida di ManagerShow.
+visibile = False
+testo =
+file_immagine =
+file_audio =
+colore_sfondo = #1e1e1e
+link_donazione =
+testo_grazie =
