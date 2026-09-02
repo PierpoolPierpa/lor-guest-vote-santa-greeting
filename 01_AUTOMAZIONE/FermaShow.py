@@ -14,7 +14,7 @@ import configparser
 import socket
 import subprocess
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -32,6 +32,25 @@ def _log(messaggio: str) -> None:
     riga = f"{datetime.now():%Y-%m-%d %H:%M:%S} {messaggio}\n"
     with open(FILE_LOG_STOP, "a", encoding="utf-8") as f:
         f.write(riga)
+
+
+def periodo_attivo() -> bool:
+    """Stessa logica di AvviaShow.periodo_attivo() (vedi li' per i
+    dettagli): oggi deve cadere dentro [Data_Inizio, Data_Fine] di
+    [ORARI], oppure quei campi devono essere vuoti."""
+    parser = configparser.ConfigParser()
+    parser.read(CONFIG_PATH, encoding="utf-8")
+    grezzo_inizio = parser.get("ORARI", "Data_Inizio", fallback="").strip()
+    grezzo_fine = parser.get("ORARI", "Data_Fine", fallback="").strip()
+    oggi = date.today()
+    try:
+        if grezzo_inizio and oggi < date.fromisoformat(grezzo_inizio):
+            return False
+        if grezzo_fine and oggi > date.fromisoformat(grezzo_fine):
+            return False
+    except ValueError:
+        return True
+    return True
 
 
 def _e_processo_python(pid: int) -> bool:
@@ -118,6 +137,9 @@ def riattiva_aggiornamenti_windows() -> None:
 
 if __name__ == "__main__":
     _log("=== FermaShow: arresto richiesto ===")
-    ferma(FILE_PID_VOTO)
-    ferma(FILE_PID_MOTORE)
-    riattiva_aggiornamenti_windows()
+    if periodo_attivo():
+        ferma(FILE_PID_VOTO)
+        ferma(FILE_PID_MOTORE)
+        riattiva_aggiornamenti_windows()
+    else:
+        _log("Fuori dal periodo attivo (Data_Inizio/Data_Fine in [ORARI]): nessuna azione.")

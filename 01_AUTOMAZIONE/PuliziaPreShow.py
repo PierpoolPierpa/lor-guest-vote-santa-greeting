@@ -19,7 +19,7 @@ import os
 import shutil
 import subprocess
 import tkinter as tk
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 SECONDI_TIMEOUT_CONFERMA = 20
@@ -61,6 +61,25 @@ def leggi_configurazione_pulizia() -> dict:
         "programmi_extra": programmi_extra,
         "blocca_aggiornamenti": sezione.getboolean("Blocca_Aggiornamenti_Windows", fallback=False),
     }
+
+
+def periodo_attivo() -> bool:
+    """Stessa logica di AvviaShow.periodo_attivo() (vedi li' per i
+    dettagli): oggi deve cadere dentro [Data_Inizio, Data_Fine] di
+    [ORARI], oppure quei campi devono essere vuoti."""
+    parser = configparser.ConfigParser()
+    parser.read(CONFIG_PATH, encoding="utf-8")
+    grezzo_inizio = parser.get("ORARI", "Data_Inizio", fallback="").strip()
+    grezzo_fine = parser.get("ORARI", "Data_Fine", fallback="").strip()
+    oggi = date.today()
+    try:
+        if grezzo_inizio and oggi < date.fromisoformat(grezzo_inizio):
+            return False
+        if grezzo_fine and oggi > date.fromisoformat(grezzo_fine):
+            return False
+    except ValueError:
+        return True
+    return True
 
 
 def conferma_chiusura(nome_processo: str, secondi_timeout: int = SECONDI_TIMEOUT_CONFERMA) -> bool:
@@ -216,4 +235,7 @@ def esegui_pulizia() -> None:
 
 
 if __name__ == "__main__":
-    esegui_pulizia()
+    if periodo_attivo():
+        esegui_pulizia()
+    else:
+        _log("Fuori dal periodo attivo (Data_Inizio/Data_Fine in [ORARI]): nessuna azione.")

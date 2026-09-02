@@ -24,6 +24,14 @@ orario_accensione = 17:00
 orario_spegnimento = 21:00
 # 0=Lunedi ... 6=Domenica
 giorni_attivi = 0,1,2,3,4,5,6
+# Facoltativo, formato AAAA-MM-GG (il tab Programmazione di ManagerShow
+# li mostra e li fa compilare in GG/MM/AAAA, poi li salva qui in questo
+# formato). Vuoto = nessun limite (comportamento storico). Se compilate,
+# Avvio/Stop/Pulizia restano "ibernati" - non fanno nulla, anche se la
+# pianificazione Windows li richiama ogni giorno - finche' l'orologio di
+# sistema non entra in questo periodo.
+data_inizio =
+data_fine =
 
 [OPZIONI]
 verifica_portatile = False

@@ -25,7 +25,7 @@ import socket
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -43,6 +43,28 @@ def _porta_votoshow() -> int:
     parser = configparser.ConfigParser()
     parser.read(CONFIG_PATH, encoding="utf-8")
     return parser.getint("VOTO", "Porta_Server", fallback=8080)
+
+
+def periodo_attivo() -> bool:
+    """Vero se oggi cade dentro [Data_Inizio, Data_Fine] di [ORARI] in
+    CONFIGURAZIONE_SHOW.ini (formato AAAA-MM-GG, estremi inclusi). Se uno
+    dei due campi e' vuoto, quel lato resta senza limite. Se sono
+    entrambi vuoti (default), sempre attivo - stesso comportamento di
+    prima dell'introduzione del periodo. Una data mal formattata viene
+    ignorata (non blocchiamo lo show per un errore di battitura)."""
+    parser = configparser.ConfigParser()
+    parser.read(CONFIG_PATH, encoding="utf-8")
+    grezzo_inizio = parser.get("ORARI", "Data_Inizio", fallback="").strip()
+    grezzo_fine = parser.get("ORARI", "Data_Fine", fallback="").strip()
+    oggi = date.today()
+    try:
+        if grezzo_inizio and oggi < date.fromisoformat(grezzo_inizio):
+            return False
+        if grezzo_fine and oggi > date.fromisoformat(grezzo_fine):
+            return False
+    except ValueError:
+        return True
+    return True
 
 PYTHON_EXE = Path(sys.executable).parent / "python.exe"
 CREATE_NO_WINDOW = 0x08000000
@@ -162,5 +184,8 @@ def avvia(percorso_script: Path, file_pid: Path, priorita_bassa: bool = False, p
 
 if __name__ == "__main__":
     _log("=== AvviaShow: avvio richiesto ===")
-    avvia(FILE_VOTOSHOW, FILE_PID_VOTO, priorita_bassa=True, porta=_porta_votoshow())
-    avvia(FILE_MOTORESHOW, FILE_PID_MOTORE)
+    if periodo_attivo():
+        avvia(FILE_VOTOSHOW, FILE_PID_VOTO, priorita_bassa=True, porta=_porta_votoshow())
+        avvia(FILE_MOTORESHOW, FILE_PID_MOTORE)
+    else:
+        _log("Fuori dal periodo attivo (Data_Inizio/Data_Fine in [ORARI]): nessuna azione.")

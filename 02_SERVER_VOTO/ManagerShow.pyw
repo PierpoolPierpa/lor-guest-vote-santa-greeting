@@ -35,7 +35,7 @@ import tkinter as tk
 import urllib.error
 import urllib.request
 import webbrowser
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from tkinter import colorchooser, filedialog, messagebox, simpledialog, ttk
 
@@ -1416,10 +1416,14 @@ class ManagerShow(tk.Tk):
         self.label_giorni.configure(text=self._t("ms_titolo_giorni"))
         for indice, checkbutton in enumerate(self.checkbutton_giorni):
             checkbutton.configure(text=self._t(f"ms_giorno_{indice}"))
+        self.label_data_inizio.configure(text=self._t("ms_campo_data_inizio"))
+        self.label_data_fine.configure(text=self._t("ms_campo_data_fine"))
+        self._aggiorna_stato_periodo()
         self.frame_pulizia.configure(text=self._t("ms_titolo_pulizia"))
         self.label_minuti_anticipo.configure(text=self._t("ms_campo_minuti_anticipo"))
         self.bottone_pulisci_ora.configure(text=self._t("ms_bottone_pulisci_ora"))
         self.bottone_guida_pulizia.configure(text=self._t("ms_bottone_guida_pulizia"))
+        self.bottone_salva_orari_pulizia.configure(text=self._t("ms_bottone_salva_orari"))
         self.checkbutton_chiudi_chrome.configure(text=self._t("ms_titolo_chiudi_chrome"))
         self.checkbutton_pulisci_cache.configure(text=self._t("ms_titolo_pulisci_cache"))
         self.checkbutton_blocca_aggiornamenti.configure(text=self._t("ms_titolo_blocca_aggiornamenti"))
@@ -2031,8 +2035,31 @@ class ManagerShow(tk.Tk):
             checkbutton.grid(row=0, column=indice, padx=4)
             self.checkbutton_giorni.append(checkbutton)
 
+        self.label_data_inizio = ttk.Label(self.frame_orari)
+        self.label_data_inizio.grid(row=4, column=0, sticky="w", **padding)
+        self.var_data_inizio = tk.StringVar()
+        ttk.Entry(self.frame_orari, textvariable=self.var_data_inizio, width=12).grid(
+            row=4, column=1, sticky="w", **padding
+        )
+
+        self.label_data_fine = ttk.Label(self.frame_orari)
+        self.label_data_fine.grid(row=5, column=0, sticky="w", **padding)
+        self.var_data_fine = tk.StringVar()
+        ttk.Entry(self.frame_orari, textvariable=self.var_data_fine, width=12).grid(
+            row=5, column=1, sticky="w", **padding
+        )
+
+        self.var_data_inizio.trace_add("write", lambda *_: self._aggiorna_stato_periodo())
+        self.var_data_fine.trace_add("write", lambda *_: self._aggiorna_stato_periodo())
+
+        self.var_stato_periodo = tk.StringVar()
+        self.label_stato_periodo = ttk.Label(
+            self.frame_orari, textvariable=self.var_stato_periodo, justify="left", wraplength=460,
+        )
+        self.label_stato_periodo.grid(row=6, column=0, columnspan=4, sticky="w", padx=8, pady=(0, 4))
+
         frame_bottoni_orari = ttk.Frame(self.frame_orari)
-        frame_bottoni_orari.grid(row=4, column=0, columnspan=4, sticky="w", padx=8, pady=(4, 8))
+        frame_bottoni_orari.grid(row=7, column=0, columnspan=4, sticky="w", padx=8, pady=(4, 8))
         self.bottone_salva_orari = ttk.Button(frame_bottoni_orari, command=self._salva_orari_bottone)
         self.bottone_salva_orari.pack(side="left", padx=(0, 4))
         self.bottone_pianificazione = ttk.Button(frame_bottoni_orari, command=self._alterna_pianificazione)
@@ -2046,16 +2073,24 @@ class ManagerShow(tk.Tk):
 
         self.frame_pulizia = ttk.LabelFrame(padre)
         self.frame_pulizia.grid(row=2, column=0, sticky="ew", **padding)
-        self.label_minuti_anticipo = ttk.Label(self.frame_pulizia)
-        self.label_minuti_anticipo.grid(row=0, column=0, sticky="w", **padding)
+        frame_riga_minuti = ttk.Frame(self.frame_pulizia)
+        frame_riga_minuti.grid(row=0, column=0, columnspan=4, sticky="w", padx=(8, 0), pady=4)
+
+        self.label_minuti_anticipo = ttk.Label(frame_riga_minuti)
+        self.label_minuti_anticipo.pack(side="left")
         self.var_minuti_anticipo = tk.StringVar()
-        ttk.Entry(self.frame_pulizia, textvariable=self.var_minuti_anticipo, width=6).grid(
-            row=0, column=1, sticky="w", padx=(4, 4), pady=4
+        ttk.Entry(frame_riga_minuti, textvariable=self.var_minuti_anticipo, width=6).pack(
+            side="left", padx=(4, 32)
         )
-        self.bottone_pulisci_ora = ttk.Button(self.frame_pulizia, command=self._pulisci_ora)
-        self.bottone_pulisci_ora.grid(row=0, column=2, padx=(0, 4))
-        self.bottone_guida_pulizia = ttk.Button(self.frame_pulizia, command=self._apri_guida_pulizia)
-        self.bottone_guida_pulizia.grid(row=0, column=3, padx=(0, 8))
+
+        frame_bottoni_pulizia = ttk.Frame(frame_riga_minuti)
+        frame_bottoni_pulizia.pack(side="left", padx=(0, 32))
+        self.bottone_pulisci_ora = ttk.Button(frame_bottoni_pulizia, command=self._pulisci_ora)
+        self.bottone_pulisci_ora.grid(row=0, column=0, padx=(0, 4))
+        self.bottone_guida_pulizia = ttk.Button(frame_bottoni_pulizia, command=self._apri_guida_pulizia)
+        self.bottone_guida_pulizia.grid(row=0, column=1)
+        self.bottone_salva_orari_pulizia = ttk.Button(frame_bottoni_pulizia, command=self._salva_orari_bottone)
+        self.bottone_salva_orari_pulizia.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         self.var_chiudi_chrome = tk.BooleanVar()
         self.checkbutton_chiudi_chrome = ttk.Checkbutton(self.frame_pulizia, variable=self.var_chiudi_chrome)
@@ -2383,6 +2418,10 @@ class ManagerShow(tk.Tk):
         for indice in range(len(GIORNI_SETTIMANA)):
             self.var_giorni[indice].set(str(indice) in giorni_salvati)
 
+        self.var_data_inizio.set(self._data_iso_a_gui(orari.get("Data_Inizio", "")))
+        self.var_data_fine.set(self._data_iso_a_gui(orari.get("Data_Fine", "")))
+        self._aggiorna_stato_periodo()
+
         pulizia = parser[SEZIONE_PULIZIA] if SEZIONE_PULIZIA in parser else {}
         self.var_minuti_anticipo.set(str(pulizia.get("Minuti_Anticipo", "15")))
         self.var_chiudi_chrome.set(
@@ -2409,6 +2448,44 @@ class ManagerShow(tk.Tk):
         except ValueError:
             return False
 
+    @staticmethod
+    def _data_valida(testo_data: str) -> bool:
+        """Vuoto conta come valido (= nessun limite su quel lato). Il
+        campo in GUI e' in formato italiano GG/MM/AAAA (l'ini sotto
+        resta AAAA-MM-GG, vedi _data_gui_a_iso/_data_iso_a_gui)."""
+        testo_data = testo_data.strip()
+        if not testo_data:
+            return True
+        try:
+            datetime.strptime(testo_data, "%d/%m/%Y")
+            return True
+        except ValueError:
+            return False
+
+    @staticmethod
+    def _data_gui_a_iso(testo_data: str) -> str:
+        """Converte GG/MM/AAAA (GUI) in AAAA-MM-GG (ini). Stringa vuota
+        resta vuota. Presuppone che _data_valida sia gia' stato
+        verificato a monte."""
+        testo_data = testo_data.strip()
+        if not testo_data:
+            return ""
+        return datetime.strptime(testo_data, "%d/%m/%Y").date().isoformat()
+
+    @staticmethod
+    def _data_iso_a_gui(testo_iso: str) -> str:
+        """Converte AAAA-MM-GG (ini) in GG/MM/AAAA (GUI). Una data gia'
+        mal formattata nell'ini (es. modificata a mano) viene mostrata
+        cosi' com'e' invece di far sparire il valore, cosi' l'utente se
+        ne accorge e la corregge dalla GUI stessa."""
+        testo_iso = testo_iso.strip()
+        if not testo_iso:
+            return ""
+        try:
+            return date.fromisoformat(testo_iso).strftime("%d/%m/%Y")
+        except ValueError:
+            return testo_iso
+
     def _valida_orari(self) -> bool:
         if not self._orario_valido(self.var_accensione.get()):
             messagebox.showerror(self._t("ms_errore_orario_titolo"), self._t("ms_errore_orario_accensione_testo"))
@@ -2422,6 +2499,16 @@ class ManagerShow(tk.Tk):
         if not self.var_minuti_anticipo.get().strip().isdigit():
             messagebox.showerror(self._t("ms_errore_minuti_titolo"), self._t("ms_errore_minuti_testo"))
             return False
+        if not self._data_valida(self.var_data_inizio.get()) or not self._data_valida(self.var_data_fine.get()):
+            messagebox.showerror(self._t("ms_errore_data_titolo"), self._t("ms_errore_data_formato_testo"))
+            return False
+        data_inizio = self.var_data_inizio.get().strip()
+        data_fine = self.var_data_fine.get().strip()
+        if data_inizio and data_fine and (
+            datetime.strptime(data_inizio, "%d/%m/%Y") > datetime.strptime(data_fine, "%d/%m/%Y")
+        ):
+            messagebox.showerror(self._t("ms_errore_data_titolo"), self._t("ms_errore_data_ordine_testo"))
+            return False
         return True
 
     def _salva_orari_su_ini(self) -> bool:
@@ -2432,6 +2519,8 @@ class ManagerShow(tk.Tk):
         parser[SEZIONE_ORARI]["Orario_Spegnimento"] = self.var_spegnimento.get().strip()
         giorni_selezionati = [str(i) for i, v in enumerate(self.var_giorni) if v.get()]
         parser[SEZIONE_ORARI]["Giorni_Attivi"] = ",".join(giorni_selezionati)
+        parser[SEZIONE_ORARI]["Data_Inizio"] = self._data_gui_a_iso(self.var_data_inizio.get())
+        parser[SEZIONE_ORARI]["Data_Fine"] = self._data_gui_a_iso(self.var_data_fine.get())
         if SEZIONE_PULIZIA not in parser:
             parser[SEZIONE_PULIZIA] = {}
         parser[SEZIONE_PULIZIA]["Minuti_Anticipo"] = self.var_minuti_anticipo.get().strip()
@@ -2443,8 +2532,49 @@ class ManagerShow(tk.Tk):
         return True
 
     def _salva_orari_bottone(self):
-        if self._salva_orari_su_ini():
+        if not self._salva_orari_su_ini():
+            return
+        self._aggiorna_stato_periodo()
+        if _task_esiste(NOME_TASK_AVVIO) and _task_esiste(NOME_TASK_STOP) and _task_esiste(NOME_TASK_PULIZIA):
+            # La pianificazione Windows e' gia' attiva: la riallineiamo
+            # subito ai valori appena salvati (schtasks /create usa /f,
+            # sovrascrive senza bisogno di rimuovere prima) - cosi' non si
+            # rischia piu' di restare con un orario vecchio nell'attivita'
+            # di Windows perche' ci si e' dimenticati di ripremere
+            # "Pianifica Win Auto" dopo aver cambiato un orario.
+            self._applica_pianificazione()
+        else:
             messagebox.showinfo(self._t("gc_fatto_titolo"), self._t("ms_salva_orari_promemoria_testo"))
+
+    def _aggiorna_stato_periodo(self):
+        """Mostra sotto i campi Data_Inizio/Data_Fine se lo show e'
+        attualmente "ibernato" (fuori periodo) o attivo, calcolato sui
+        valori correnti dei campi (anche non ancora salvati) confrontati
+        con la data di oggi - stessa logica di AvviaShow.periodo_attivo()."""
+        if not hasattr(self, "var_stato_periodo"):
+            return
+        testo_inizio = self.var_data_inizio.get().strip()
+        testo_fine = self.var_data_fine.get().strip()
+        if not testo_inizio and not testo_fine:
+            self.var_stato_periodo.set(self._t("ms_stato_periodo_sempre_attivo"))
+            self.label_stato_periodo.configure(foreground="#888")
+            return
+        if not self._data_valida(testo_inizio) or not self._data_valida(testo_fine):
+            self.var_stato_periodo.set(self._t("ms_stato_periodo_data_non_valida"))
+            self.label_stato_periodo.configure(foreground="#c62828")
+            return
+        oggi = date.today()
+        dentro_periodo = True
+        if testo_inizio and oggi < datetime.strptime(testo_inizio, "%d/%m/%Y").date():
+            dentro_periodo = False
+        if testo_fine and oggi > datetime.strptime(testo_fine, "%d/%m/%Y").date():
+            dentro_periodo = False
+        if dentro_periodo:
+            self.var_stato_periodo.set(self._t("ms_stato_periodo_attivo"))
+            self.label_stato_periodo.configure(foreground="#2e7d32")
+        else:
+            self.var_stato_periodo.set(self._t("ms_stato_periodo_ibernato"))
+            self.label_stato_periodo.configure(foreground="#c62828")
 
     def _applica_pianificazione(self):
         if not self._salva_orari_su_ini():
