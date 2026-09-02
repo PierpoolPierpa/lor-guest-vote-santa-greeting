@@ -28,6 +28,14 @@ LOG/
 02_SERVER_VOTO/INFO/*
 !02_SERVER_VOTO/INFO/.gitkeep
 
+# Archivio profili QR Code (nome rete + password WiFi in chiaro + QR
+# generati): dati personali di ogni installazione, mai nel repository.
+02_SERVER_VOTO/QR_PROFILI/
+
+# Cartelli QR salvati manualmente fuori dall'archivio (contengono la
+# password WiFi reale "leggibile" nell'immagine) - stessa cautela.
+/PROFILI QRCODE WIFI/
+
 # Collegamenti Windows (.lnk): puntano a percorsi assoluti della macchina
 # su cui sono stati creati, inutili/fuorvianti su un'altra macchina.
 *.lnk
@@ -41,3 +49,9 @@ Cartello_QRcode_Show_Luci.pdf
 # documentazione per chi scarica il progetto - vedi README.md invece).
 02_SERVER_VOTO/HANDOFF_SESSIONE.md
 CONTESTO_PROGETTI_CLAUDE.md
+
+# Materiale di lavoro/test della pipeline saluti (audio generati, chiavi
+# API, test tecnici LOR) - non fa parte del codice sorgente da distribuire,
+# e contiene chiavi private che non devono mai essere pubblicate.
+SALUTI_AUDIO/
+TEST_CACHE_LOREDIT/

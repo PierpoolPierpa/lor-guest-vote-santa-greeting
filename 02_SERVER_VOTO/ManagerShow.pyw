@@ -23,6 +23,7 @@ import ctypes
 import ctypes.wintypes
 import json
 import os
+import secrets
 import shutil
 import socket
 import sqlite3
@@ -103,10 +104,17 @@ SEZIONE_BENVENUTO = "BENVENUTO"
 SEZIONE_SALUTO_BABBONATALE = "SALUTO_BABBONATALE"
 SEZIONE_INFO = "INFO"
 SEZIONE_QRCODE = "QRCODE"
+SEZIONE_INTERFACCIA = "INTERFACCIA"
 CARTELLA_BENVENUTO = cat.SCRIPT_DIR / "BENVENUTO"
 CARTELLA_INFO = cat.SCRIPT_DIR / "INFO"
 COLORE_BENVENUTO_DEFAULT = "#1e1e1e"
 COLORE_INFO_DEFAULT = "#1e1e1e"
+
+# Archivio profili QR Code (una WiFi+password+QR per riga, es. "rete
+# ospiti" e "rete privata"): dati personali (password WiFi in chiaro),
+# mai nel repository - vedi .gitignore.
+CARTELLA_QR_PROFILI = cat.SCRIPT_DIR / "QR_PROFILI"
+FILE_QR_PROFILI = CARTELLA_QR_PROFILI / "profili.json"
 
 # Database storico (stesso file che scrive VotoShow.py): qui lo si legge
 # soltanto, per la scheda "Storico". Se VotoShow.py non e' mai stato
@@ -1209,11 +1217,17 @@ class ManagerShow(tk.Tk):
             side="right", padx=(0, 2)
         )
 
+        self.bottone_salva_ordine_schede = ttk.Button(
+            barra_superiore, command=self._salva_ordine_schede,
+        )
+        self.bottone_salva_ordine_schede.pack(side="left")
+
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
 
         self.tab_canzoni = ttk.Frame(self.notebook)
         self.tab_programmazione = ttk.Frame(self.notebook)
+        self.tab_saluto_babbonatale = ttk.Frame(self.notebook)
         self.tab_benvenuto = ttk.Frame(self.notebook)
         self.tab_info = ttk.Frame(self.notebook)
         self.tab_qrcode = ttk.Frame(self.notebook)
@@ -1221,19 +1235,37 @@ class ManagerShow(tk.Tk):
         self.tab_grafico = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_canzoni, text="Canzoni")
         self.notebook.add(self.tab_programmazione, text="Programmazione")
-        self.notebook.add(self.tab_storico, text="Storico")
-        self.notebook.add(self.tab_grafico, text="Grafico")
         self.notebook.add(self.tab_benvenuto, text="Benvenuto")
         self.notebook.add(self.tab_info, text="Info")
         self.notebook.add(self.tab_qrcode, text="QR Code")
+        self.notebook.add(self.tab_saluto_babbonatale, text="Saluto Babbo Natale")
+        self.notebook.add(self.tab_storico, text="Storico")
+        self.notebook.add(self.tab_grafico, text="Grafico")
 
         self._costruisci_tab_canzoni(self.tab_canzoni)
         self._costruisci_tab_programmazione(self.tab_programmazione)
         self._costruisci_tab_benvenuto(self.tab_benvenuto)
         self._costruisci_tab_info(self.tab_info)
         self._costruisci_tab_qrcode(self.tab_qrcode)
+        self._costruisci_tab_saluto_babbonatale(self.tab_saluto_babbonatale)
         self._costruisci_tab_storico(self.tab_storico)
         self._costruisci_tab_grafico(self.tab_grafico)
+
+        self._chiave_per_scheda = {
+            self.tab_canzoni: "canzoni",
+            self.tab_programmazione: "programmazione",
+            self.tab_benvenuto: "benvenuto",
+            self.tab_info: "info",
+            self.tab_qrcode: "qrcode",
+            self.tab_saluto_babbonatale: "saluto_babbonatale",
+            self.tab_storico: "storico",
+            self.tab_grafico: "grafico",
+        }
+        self._scheda_per_chiave = {chiave: scheda for scheda, chiave in self._chiave_per_scheda.items()}
+        self._chiave_per_percorso_scheda = {str(scheda): chiave for scheda, chiave in self._chiave_per_scheda.items()}
+
+        self._carica_ordine_schede_da_ini()
+        self._abilita_trascinamento_schede()
 
         self._ritraduci_interfaccia()
         self.ricarica_lista()
@@ -1281,6 +1313,65 @@ class ManagerShow(tk.Tk):
         self.bottone_rigenera = ttk.Button(frame_bottoni_1, command=self._rigenera_manuale)
         self.bottone_rigenera.pack(side="right", padx=4)
 
+    def _carica_ordine_schede_da_ini(self):
+        parser = carica_parser()
+        if SEZIONE_INTERFACCIA not in parser:
+            return
+        ordine_testo = parser.get(SEZIONE_INTERFACCIA, "Ordine_Schede", fallback="").strip()
+        if not ordine_testo:
+            return
+        chiavi_salvate = [c.strip() for c in ordine_testo.split(",") if c.strip()]
+        for indice, chiave in enumerate(chiavi_salvate):
+            scheda = self._scheda_per_chiave.get(chiave)
+            if scheda is not None:
+                self.notebook.insert(indice, scheda)
+
+    def _salva_ordine_schede(self):
+        chiavi_in_ordine = [
+            self._chiave_per_percorso_scheda[percorso]
+            for percorso in self.notebook.tabs()
+            if percorso in self._chiave_per_percorso_scheda
+        ]
+        parser = carica_parser()
+        if SEZIONE_INTERFACCIA not in parser:
+            parser[SEZIONE_INTERFACCIA] = {}
+        parser[SEZIONE_INTERFACCIA]["Ordine_Schede"] = ",".join(chiavi_in_ordine)
+        salva_parser(parser)
+        messagebox.showinfo(self._t("gc_fatto_titolo"), self._t("ms_ordine_schede_salvato_testo"))
+
+    def _abilita_trascinamento_schede(self):
+        """Permette di riordinare le schede trascinandole con il mouse
+        (come i tab di un browser). Il nuovo ordine resta attivo solo
+        per questa sessione finche' non si preme "Salva ordine schede":
+        solo allora viene scritto nell'ini e ripristinato ai prossimi
+        avvii."""
+        self._scheda_in_trascinamento = None
+        self.notebook.bind("<ButtonPress-1>", self._inizio_trascinamento_scheda)
+        self.notebook.bind("<B1-Motion>", self._durante_trascinamento_scheda)
+        self.notebook.bind("<ButtonRelease-1>", self._fine_trascinamento_scheda)
+
+    def _indice_scheda_sotto_mouse(self, evento):
+        try:
+            return self.notebook.index(f"@{evento.x},{evento.y}")
+        except tk.TclError:
+            return None
+
+    def _inizio_trascinamento_scheda(self, evento):
+        self._scheda_in_trascinamento = self._indice_scheda_sotto_mouse(evento)
+
+    def _durante_trascinamento_scheda(self, evento):
+        if self._scheda_in_trascinamento is None:
+            return
+        indice_sotto_mouse = self._indice_scheda_sotto_mouse(evento)
+        if indice_sotto_mouse is None or indice_sotto_mouse == self._scheda_in_trascinamento:
+            return
+        scheda = self.notebook.tabs()[self._scheda_in_trascinamento]
+        self.notebook.insert(indice_sotto_mouse, scheda)
+        self._scheda_in_trascinamento = indice_sotto_mouse
+
+    def _fine_trascinamento_scheda(self, evento):
+        self._scheda_in_trascinamento = None
+
     def _cambia_lingua(self):
         self.lingua = "en" if self.lingua == "it" else "it"
         self._ritraduci_interfaccia()
@@ -1290,12 +1381,14 @@ class ManagerShow(tk.Tk):
         self.title(self._t("ms_titolo_finestra"))
         self.notebook.tab(self.tab_canzoni, text=self._t("ms_scheda_canzoni"))
         self.notebook.tab(self.tab_programmazione, text=self._t("ms_scheda_programmazione"))
-        self.notebook.tab(self.tab_storico, text=self._t("ms_scheda_storico"))
-        self.notebook.tab(self.tab_grafico, text=self._t("ms_scheda_grafico"))
         self.notebook.tab(self.tab_benvenuto, text=self._t("ms_scheda_benvenuto"))
         self.notebook.tab(self.tab_info, text=self._t("ms_scheda_info"))
         self.notebook.tab(self.tab_qrcode, text=self._t("ms_scheda_qrcode"))
+        self.notebook.tab(self.tab_saluto_babbonatale, text=self._t("ms_scheda_saluto_babbonatale"))
+        self.notebook.tab(self.tab_storico, text=self._t("ms_scheda_storico"))
+        self.notebook.tab(self.tab_grafico, text=self._t("ms_scheda_grafico"))
         self.bottone_lingua.configure(text=self._t("gc_lingua_bottone"))
+        self.bottone_salva_ordine_schede.configure(text=self._t("ms_bottone_salva_ordine_schede"))
         self.tooltip_percorso_schede_luci.imposta_testo(self._t("ms_tooltip_percorso_schede_luci"))
 
         self.albero.heading("numero", text=self._t("gc_colonna_numero"))
@@ -1357,10 +1450,20 @@ class ManagerShow(tk.Tk):
         self.frame_saluto_babbonatale.configure(text=self._t("ms_titolo_saluto_babbonatale"))
         self.checkbutton_saluto_babbonatale.configure(text=self._t("ms_checkbox_saluto_babbonatale"))
         self.label_nota_saluto_babbonatale.configure(text=self._t("ms_nota_saluto_babbonatale"))
+
+        self.frame_token_admin.configure(text=self._t("ms_titolo_token_admin"))
+        self.label_token_admin.configure(text=self._t("ms_label_token_admin"))
+        self.bottone_mostra_token_admin.configure(
+            text=self._t("ms_bottone_nascondi_token" if self.token_admin_visibile else "ms_bottone_mostra_token")
+        )
+        self.bottone_genera_token_admin.configure(text=self._t("ms_bottone_genera_token"))
+        self.label_nota_token_admin.configure(text=self._t("ms_nota_token_admin"))
+        self.bottone_salva_token_admin.configure(text=self._t("ms_bottone_salva_token"))
         self.bottone_salva_saluto_babbonatale.configure(text=self._t("ms_bottone_salva_saluto_babbonatale"))
 
         self.bottone_guida.configure(text=self._t("ms_bottone_guida"))
         self.bottone_guida_canzoni.configure(text=self._t("ms_bottone_guida"))
+        self.bottone_guida_saluto_babbonatale.configure(text=self._t("ms_bottone_guida"))
         self.label_avviso_avvia_ferma.configure(text=self._t("ms_avviso_avvia_ferma_testo"))
         if self.finestra_guida is not None and self.finestra_guida.winfo_exists():
             self.finestra_guida.destroy()
@@ -1397,6 +1500,21 @@ class ManagerShow(tk.Tk):
         self.label_qr_etichetta_voto.configure(text=self._t("ms_qr_etichetta_voto"))
         self.bottone_qr_salva_wifi.configure(text=self._t("ms_qr_bottone_salva_wifi"))
         self.bottone_qr_salva_voto.configure(text=self._t("ms_qr_bottone_salva_voto"))
+
+        self.frame_qr_cartello.configure(text=self._t("ms_qr_titolo_cartello"))
+        self.label_qr_cartello_titolo.configure(text=self._t("ms_qr_campo_cartello_titolo"))
+        self.label_qr_cartello_sottotitolo.configure(text=self._t("ms_qr_campo_cartello_sottotitolo"))
+        self.checkbutton_qr_cartello_includi_voto.configure(text=self._t("ms_qr_checkbox_cartello_includi_voto"))
+        self.bottone_qr_genera_cartello.configure(text=self._t("ms_qr_bottone_genera_cartello"))
+        self.bottone_qr_stampa_cartello.configure(text=self._t("ms_qr_bottone_stampa_cartello"))
+
+        self.frame_qr_profili.configure(text=self._t("ms_qr_titolo_profili"))
+        self.bottone_qr_salva_profilo.configure(text=self._t("ms_qr_bottone_salva_profilo"))
+        self.albero_qr_profili.heading("nome", text=self._t("ms_qr_colonna_nome"))
+        self.albero_qr_profili.heading("ssid", text=self._t("ms_qr_colonna_ssid"))
+        self.albero_qr_profili.heading("ip", text=self._t("ms_qr_colonna_ip"))
+        self.bottone_qr_carica_profilo.configure(text=self._t("ms_qr_bottone_carica_profilo"))
+        self.bottone_qr_elimina_profilo.configure(text=self._t("ms_qr_bottone_elimina_profilo"))
 
     def _ritraduci_tab_info(self):
         self.label_nota_info.configure(text=self._t("ms_inf_nota_scheda"))
@@ -1806,8 +1924,44 @@ class ManagerShow(tk.Tk):
     # ------------------------------------------------------------------
     # Scheda Programmazione
     # ------------------------------------------------------------------
+    @staticmethod
+    def _crea_area_scorrevole(padre):
+        """Avvolge il contenuto di una scheda in un Canvas+Scrollbar
+        verticale: alcune schede (es. Programmazione) hanno piu' sezioni
+        di quante ne stiano in altezza su schermi piccoli o con
+        risoluzioni/DPI diversi (il progetto e' pubblico, non solo per
+        il nostro monitor). Ritorna il frame interno su cui costruire
+        il contenuto, esattamente come si farebbe su 'padre' diretto."""
+        padre.rowconfigure(0, weight=1)
+        padre.columnconfigure(0, weight=1)
+
+        canvas = tk.Canvas(padre, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(padre, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        contenuto = ttk.Frame(canvas)
+        id_finestra = canvas.create_window((0, 0), window=contenuto, anchor="nw")
+
+        def _aggiorna_regione_scorrimento(evento=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        contenuto.bind("<Configure>", _aggiorna_regione_scorrimento)
+
+        def _adatta_larghezza_contenuto(evento):
+            canvas.itemconfigure(id_finestra, width=evento.width)
+        canvas.bind("<Configure>", _adatta_larghezza_contenuto)
+
+        def _scorri_con_rotellina(evento):
+            canvas.yview_scroll(int(-1 * (evento.delta / 120)), "units")
+        canvas.bind("<Enter>", lambda evento: canvas.bind_all("<MouseWheel>", _scorri_con_rotellina))
+        canvas.bind("<Leave>", lambda evento: canvas.unbind_all("<MouseWheel>"))
+
+        return contenuto
+
     def _costruisci_tab_programmazione(self, padre):
         padding = {"padx": 8, "pady": 4}
+        padre = self._crea_area_scorrevole(padre)
         padre.columnconfigure(0, weight=1)
 
         frame_guida_bottone = ttk.Frame(padre)
@@ -1979,8 +2133,54 @@ class ManagerShow(tk.Tk):
         )
         self.bottone_salva_modalita_coda.grid(row=4, column=0, sticky="w", padx=8, pady=(6, 10))
 
+        self.frame_token_admin = ttk.LabelFrame(padre)
+        self.frame_token_admin.grid(row=4, column=0, sticky="ew", **padding)
+
+        self.label_token_admin = ttk.Label(self.frame_token_admin)
+        self.label_token_admin.grid(row=0, column=0, sticky="w", padx=8, pady=(8, 4))
+        self.var_token_admin = tk.StringVar()
+        self.entry_token_admin = ttk.Entry(
+            self.frame_token_admin, textvariable=self.var_token_admin, width=32, show="*",
+        )
+        self.entry_token_admin.grid(row=0, column=1, sticky="w", padx=(0, 8), pady=(8, 4))
+
+        frame_bottoni_token_admin = ttk.Frame(self.frame_token_admin)
+        frame_bottoni_token_admin.grid(row=0, column=2, sticky="w", padx=(0, 8), pady=(8, 4))
+        self.token_admin_visibile = False
+        self.bottone_mostra_token_admin = ttk.Button(
+            frame_bottoni_token_admin, command=self._alterna_visibilita_token_admin,
+        )
+        self.bottone_mostra_token_admin.pack(side="left", padx=(0, 4))
+        self.bottone_genera_token_admin = ttk.Button(
+            frame_bottoni_token_admin, command=self._genera_token_admin,
+        )
+        self.bottone_genera_token_admin.pack(side="left")
+
+        self.label_nota_token_admin = ttk.Label(
+            self.frame_token_admin, foreground="#888", justify="left", wraplength=680,
+        )
+        self.label_nota_token_admin.grid(row=1, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 10))
+
+        self.bottone_salva_token_admin = ttk.Button(
+            self.frame_token_admin, command=self._salva_token_admin,
+        )
+        self.bottone_salva_token_admin.grid(row=2, column=0, sticky="w", padx=8, pady=(0, 10))
+
+        self._carica_orari_da_ini()
+        self._carica_modalita_coda_da_ini()
+        self._carica_token_admin_da_ini()
+
+    def _costruisci_tab_saluto_babbonatale(self, padre):
+        padding = {"padx": 8, "pady": 4}
+        padre.columnconfigure(0, weight=1)
+
+        frame_guida_bottone = ttk.Frame(padre)
+        frame_guida_bottone.grid(row=0, column=1, sticky="ne", padx=8, pady=4)
+        self.bottone_guida_saluto_babbonatale = ttk.Button(frame_guida_bottone, command=self._apri_guida)
+        self.bottone_guida_saluto_babbonatale.pack()
+
         self.frame_saluto_babbonatale = ttk.LabelFrame(padre)
-        self.frame_saluto_babbonatale.grid(row=4, column=0, sticky="ew", **padding)
+        self.frame_saluto_babbonatale.grid(row=1, column=0, sticky="ew", **padding)
 
         self.var_saluto_babbonatale_abilitato = tk.BooleanVar()
         self.checkbutton_saluto_babbonatale = ttk.Checkbutton(
@@ -1998,8 +2198,6 @@ class ManagerShow(tk.Tk):
         )
         self.bottone_salva_saluto_babbonatale.grid(row=2, column=0, sticky="w", padx=8, pady=(0, 10))
 
-        self._carica_orari_da_ini()
-        self._carica_modalita_coda_da_ini()
         self._carica_saluto_babbonatale_da_ini()
 
     # Ordine fisso delle modalita' (chiave salvata in ini -> chiave di
@@ -2119,6 +2317,45 @@ class ManagerShow(tk.Tk):
                 return
 
         messagebox.showinfo(self._t("gc_fatto_titolo"), self._t("ms_saluto_babbonatale_salvata_testo"))
+
+    def _carica_token_admin_da_ini(self):
+        parser = carica_parser()
+        token = parser.get(SEZIONE_VOTO, "Token_Amministratore", fallback="").strip()
+        self.var_token_admin.set(token)
+
+    def _alterna_visibilita_token_admin(self):
+        self.token_admin_visibile = not self.token_admin_visibile
+        self.entry_token_admin.configure(show="" if self.token_admin_visibile else "*")
+        self.bottone_mostra_token_admin.configure(
+            text=self._t("ms_bottone_nascondi_token" if self.token_admin_visibile else "ms_bottone_mostra_token")
+        )
+
+    def _genera_token_admin(self):
+        self.var_token_admin.set(secrets.token_urlsafe(16))
+        if not self.token_admin_visibile:
+            self._alterna_visibilita_token_admin()
+
+    def _salva_token_admin(self):
+        token = self.var_token_admin.get().strip()
+        if not token:
+            if not messagebox.askyesno(
+                self._t("ms_token_admin_vuoto_titolo"), self._t("ms_token_admin_vuoto_testo"),
+            ):
+                return
+
+        parser = carica_parser()
+        parser[SEZIONE_VOTO]["Token_Amministratore"] = token
+        salva_parser(parser)
+
+        if AvviaShow.verifica_in_esecuzione(AvviaShow.FILE_PID_VOTO):
+            if messagebox.askyesno(
+                self._t("ms_token_admin_riavvia_ora_titolo"), self._t("ms_token_admin_riavvia_ora_testo"),
+            ):
+                self._riavvia_votoshow_silenzioso()
+                messagebox.showinfo(self._t("gc_fatto_titolo"), self._t("ms_token_admin_riavviato_testo"))
+                return
+
+        messagebox.showinfo(self._t("gc_fatto_titolo"), self._t("ms_token_admin_salvato_testo"))
 
     def _riavvia_votoshow_silenzioso(self):
         """Stop+avvio di VotoShow.py/MotoreShow.py senza i popup di
@@ -2913,6 +3150,9 @@ class ManagerShow(tk.Tk):
 
         self.frame_qr_wifi = ttk.LabelFrame(padre)
         self.frame_qr_wifi.grid(row=1, column=0, sticky="ew", **padding)
+        self.frame_qr_wifi.columnconfigure(2, weight=1)
+        self.bottone_qr_salva_profilo = ttk.Button(self.frame_qr_wifi, command=self._salva_profilo_qr)
+        self.bottone_qr_salva_profilo.grid(row=0, column=2, sticky="w", padx=8, pady=(8, 4))
         self.label_qr_campo_ssid = ttk.Label(self.frame_qr_wifi)
         self.label_qr_campo_ssid.grid(row=0, column=0, sticky="w", padx=8, pady=(8, 4))
         self.var_qr_ssid = tk.StringVar()
@@ -2960,8 +3200,11 @@ class ManagerShow(tk.Tk):
         colonna_wifi.pack(side="left", padx=(0, 20))
         self.label_qr_etichetta_wifi = ttk.Label(colonna_wifi)
         self.label_qr_etichetta_wifi.pack()
-        self.label_qr_wifi_immagine = ttk.Label(colonna_wifi)
-        self.label_qr_wifi_immagine.pack(pady=4)
+        riquadro_qr_wifi = tk.Frame(colonna_wifi, width=220, height=220, relief="groove", borderwidth=1)
+        riquadro_qr_wifi.pack(pady=4)
+        riquadro_qr_wifi.pack_propagate(False)
+        self.label_qr_wifi_immagine = ttk.Label(riquadro_qr_wifi, anchor="center")
+        self.label_qr_wifi_immagine.pack(fill="both", expand=True)
         self.bottone_qr_salva_wifi = ttk.Button(colonna_wifi, command=self._salva_immagine_wifi, state="disabled")
         self.bottone_qr_salva_wifi.pack()
 
@@ -2969,15 +3212,71 @@ class ManagerShow(tk.Tk):
         colonna_voto.pack(side="left")
         self.label_qr_etichetta_voto = ttk.Label(colonna_voto)
         self.label_qr_etichetta_voto.pack()
-        self.label_qr_voto_immagine = ttk.Label(colonna_voto)
-        self.label_qr_voto_immagine.pack(pady=4)
+        riquadro_qr_voto = tk.Frame(colonna_voto, width=220, height=220, relief="groove", borderwidth=1)
+        riquadro_qr_voto.pack(pady=4)
+        riquadro_qr_voto.pack_propagate(False)
+        self.label_qr_voto_immagine = ttk.Label(riquadro_qr_voto, anchor="center")
+        self.label_qr_voto_immagine.pack(fill="both", expand=True)
         self.bottone_qr_salva_voto = ttk.Button(colonna_voto, command=self._salva_immagine_voto, state="disabled")
         self.bottone_qr_salva_voto.pack()
 
         self.qr_wifi_immagine_pil = None
         self.qr_voto_immagine_pil = None
 
+        self.frame_qr_cartello = ttk.LabelFrame(padre)
+        self.frame_qr_cartello.grid(row=5, column=0, sticky="ew", **padding)
+        self.frame_qr_cartello.columnconfigure(1, weight=1)
+
+        self.label_qr_cartello_titolo = ttk.Label(self.frame_qr_cartello)
+        self.label_qr_cartello_titolo.grid(row=0, column=0, sticky="w", padx=8, pady=(8, 4))
+        self.var_qr_cartello_titolo = tk.StringVar()
+        ttk.Entry(self.frame_qr_cartello, textvariable=self.var_qr_cartello_titolo, width=40).grid(
+            row=0, column=1, sticky="ew", padx=(0, 8), pady=(8, 4)
+        )
+
+        self.label_qr_cartello_sottotitolo = ttk.Label(self.frame_qr_cartello)
+        self.label_qr_cartello_sottotitolo.grid(row=1, column=0, sticky="w", padx=8, pady=4)
+        self.var_qr_cartello_sottotitolo = tk.StringVar()
+        ttk.Entry(self.frame_qr_cartello, textvariable=self.var_qr_cartello_sottotitolo, width=40).grid(
+            row=1, column=1, sticky="ew", padx=(0, 8), pady=4
+        )
+
+        self.var_qr_cartello_includi_voto = tk.BooleanVar(value=True)
+        self.checkbutton_qr_cartello_includi_voto = ttk.Checkbutton(
+            self.frame_qr_cartello, variable=self.var_qr_cartello_includi_voto,
+        )
+        self.checkbutton_qr_cartello_includi_voto.grid(row=2, column=0, columnspan=2, sticky="w", padx=8, pady=4)
+
+        self._percorso_ultimo_cartello = None
+
+        frame_bottoni_cartello = ttk.Frame(self.frame_qr_cartello)
+        frame_bottoni_cartello.grid(row=3, column=0, columnspan=2, sticky="w", padx=8, pady=(4, 8))
+        self.bottone_qr_genera_cartello = ttk.Button(frame_bottoni_cartello, command=self._genera_cartello_stampabile)
+        self.bottone_qr_genera_cartello.pack(side="left", padx=(0, 4))
+        self.bottone_qr_stampa_cartello = ttk.Button(frame_bottoni_cartello, command=self._stampa_cartello)
+        self.bottone_qr_stampa_cartello.pack(side="left")
+
+        self.frame_qr_profili = ttk.LabelFrame(padre)
+        self.frame_qr_profili.grid(row=6, column=0, sticky="ew", **padding)
+        self.frame_qr_profili.columnconfigure(0, weight=1)
+
+        colonne_profili = ("nome", "ssid", "ip")
+        self.albero_qr_profili = ttk.Treeview(
+            self.frame_qr_profili, columns=colonne_profili, show="headings", height=5, selectmode="browse",
+        )
+        for colonna, larghezza in (("nome", 200), ("ssid", 200), ("ip", 140)):
+            self.albero_qr_profili.column(colonna, width=larghezza)
+        self.albero_qr_profili.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
+
+        frame_bottoni_profili = ttk.Frame(self.frame_qr_profili)
+        frame_bottoni_profili.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
+        self.bottone_qr_carica_profilo = ttk.Button(frame_bottoni_profili, command=self._carica_profilo_qr_selezionato)
+        self.bottone_qr_carica_profilo.pack(side="left", padx=(0, 4))
+        self.bottone_qr_elimina_profilo = ttk.Button(frame_bottoni_profili, command=self._elimina_profilo_qr_selezionato)
+        self.bottone_qr_elimina_profilo.pack(side="left")
+
         self._carica_dati_qrcode()
+        self._aggiorna_lista_profili_qr()
 
     QR_SICUREZZA_CHIAVI = ("WPA", "WEP", "nopass")
     QR_SICUREZZA_CHIAVE_TRADUZIONE = {
@@ -3038,6 +3337,159 @@ class ManagerShow(tk.Tk):
         self.var_qr_sicurezza_display.set(self._t(self.QR_SICUREZZA_CHIAVE_TRADUZIONE[sicurezza]))
         ip_salvato = parser.get(SEZIONE_QRCODE, "Ip", fallback="").strip()
         self.var_qr_ip.set(ip_salvato or self._rileva_ip_locale())
+        self.var_qr_cartello_titolo.set(
+            parser.get(SEZIONE_QRCODE, "Cartello_Titolo", fallback="").strip() or self.var_qr_ssid.get()
+        )
+        self.var_qr_cartello_sottotitolo.set(
+            parser.get(SEZIONE_QRCODE, "Cartello_Sottotitolo", fallback="").strip()
+            or self._t("ms_qr_cartello_sottotitolo_default")
+        )
+        self.var_qr_cartello_includi_voto.set(
+            parser.getboolean(SEZIONE_QRCODE, "Cartello_Includi_Voto", fallback=True)
+        )
+
+    @staticmethod
+    def _leggi_profili_qr() -> list:
+        if not FILE_QR_PROFILI.is_file():
+            return []
+        try:
+            with open(FILE_QR_PROFILI, "r", encoding="utf-8") as file:
+                return json.load(file)
+        except (json.JSONDecodeError, OSError):
+            return []
+
+    @staticmethod
+    def _scrivi_profili_qr(profili: list):
+        CARTELLA_QR_PROFILI.mkdir(parents=True, exist_ok=True)
+        with open(FILE_QR_PROFILI, "w", encoding="utf-8") as file:
+            json.dump(profili, file, indent=2, ensure_ascii=False)
+
+    @staticmethod
+    def _nome_cartella_sicuro(nome: str) -> str:
+        pulito = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in nome).strip()
+        return pulito.replace(" ", "_") or "profilo"
+
+    def _aggiorna_lista_profili_qr(self):
+        for riga in self.albero_qr_profili.get_children():
+            self.albero_qr_profili.delete(riga)
+        for profilo in self._leggi_profili_qr():
+            self.albero_qr_profili.insert(
+                "", "end", iid=profilo["nome"],
+                values=(profilo["nome"], profilo.get("ssid", ""), profilo.get("ip", "")),
+            )
+
+    def _salva_profilo_qr(self):
+        nome = self.var_qr_ssid.get().strip()
+        if not nome:
+            messagebox.showerror(self._t("ms_qr_errore_ssid_titolo"), self._t("ms_qr_errore_ssid_testo"))
+            return
+        if self.qr_wifi_immagine_pil is None or self.qr_voto_immagine_pil is None:
+            messagebox.showerror(self._t("ms_qr_errore_genera_prima_titolo"), self._t("ms_qr_errore_genera_prima_testo"))
+            return
+
+        profili = self._leggi_profili_qr()
+        esiste_gia = any(p["nome"] == nome for p in profili)
+        if esiste_gia:
+            if not messagebox.askyesno(self._t("ms_qr_profilo_esiste_titolo"), self._t("ms_qr_profilo_esiste_testo", nome=nome)):
+                return
+            profili = [p for p in profili if p["nome"] != nome]
+
+        cartella_profilo = CARTELLA_QR_PROFILI / self._nome_cartella_sicuro(nome)
+        cartella_profilo.mkdir(parents=True, exist_ok=True)
+        percorso_wifi = cartella_profilo / "qr_wifi.png"
+        percorso_voto = cartella_profilo / "qr_voto.png"
+        self.qr_wifi_immagine_pil.save(percorso_wifi)
+        self.qr_voto_immagine_pil.save(percorso_voto)
+
+        titolo_cartello = self.var_qr_cartello_titolo.get().strip() or nome
+        sottotitolo_cartello = self.var_qr_cartello_sottotitolo.get().strip()
+        includi_voto_cartello = self.var_qr_cartello_includi_voto.get()
+        cartello = self._crea_cartello_qr(
+            titolo_cartello, sottotitolo_cartello, self.var_qr_ssid.get().strip(),
+            self.var_qr_password.get(), includi_voto_cartello,
+        )
+        percorso_cartello = cartella_profilo / "cartello.png"
+        cartello.save(percorso_cartello, dpi=(150, 150))
+
+        profili.append({
+            "nome": nome,
+            "ssid": self.var_qr_ssid.get().strip(),
+            "password": self.var_qr_password.get(),
+            "sicurezza": self._chiave_da_etichetta_qr_sicurezza(self.var_qr_sicurezza_display.get()),
+            "ip": self.var_qr_ip.get().strip(),
+            "cartello_titolo": titolo_cartello,
+            "cartello_sottotitolo": sottotitolo_cartello,
+            "cartello_includi_voto": includi_voto_cartello,
+            "file_wifi": str(percorso_wifi),
+            "file_voto": str(percorso_voto),
+            "file_cartello": str(percorso_cartello),
+            "data": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        })
+        self._scrivi_profili_qr(profili)
+        self._aggiorna_lista_profili_qr()
+        messagebox.showinfo(self._t("gc_fatto_titolo"), self._t("ms_qr_profilo_salvato_testo", nome=nome))
+
+    def _profilo_qr_selezionato(self):
+        selezione = self.albero_qr_profili.selection()
+        if not selezione:
+            messagebox.showinfo(self._t("ms_qr_nessuna_selezione_titolo"), self._t("ms_qr_nessuna_selezione_testo"))
+            return None
+        nome = selezione[0]
+        for profilo in self._leggi_profili_qr():
+            if profilo["nome"] == nome:
+                return profilo
+        return None
+
+    def _carica_profilo_qr_selezionato(self):
+        profilo = self._profilo_qr_selezionato()
+        if profilo is None:
+            return
+
+        self.var_qr_ssid.set(profilo.get("ssid", ""))
+        self.var_qr_password.set(profilo.get("password", ""))
+        sicurezza = profilo.get("sicurezza", "WPA")
+        if sicurezza not in self.QR_SICUREZZA_CHIAVI:
+            sicurezza = "WPA"
+        self.var_qr_sicurezza_display.set(self._t(self.QR_SICUREZZA_CHIAVE_TRADUZIONE[sicurezza]))
+        self.var_qr_ip.set(profilo.get("ip", ""))
+        self.var_qr_cartello_titolo.set(profilo.get("cartello_titolo", profilo.get("nome", "")))
+        self.var_qr_cartello_sottotitolo.set(profilo.get("cartello_sottotitolo", ""))
+        self.var_qr_cartello_includi_voto.set(profilo.get("cartello_includi_voto", True))
+
+        from PIL import Image, ImageTk
+        try:
+            self.qr_wifi_immagine_pil = Image.open(profilo["file_wifi"])
+            self.qr_voto_immagine_pil = Image.open(profilo["file_voto"])
+        except (OSError, KeyError):
+            messagebox.showerror(self._t("ms_qr_errore_file_mancante_titolo"), self._t("ms_qr_errore_file_mancante_testo"))
+            return
+
+        self.qr_wifi_photoimage = ImageTk.PhotoImage(self.qr_wifi_immagine_pil.resize((220, 220)))
+        self.qr_voto_photoimage = ImageTk.PhotoImage(self.qr_voto_immagine_pil.resize((220, 220)))
+        self.label_qr_wifi_immagine.configure(image=self.qr_wifi_photoimage)
+        self.label_qr_voto_immagine.configure(image=self.qr_voto_photoimage)
+        self.bottone_qr_salva_wifi.configure(state="normal")
+        self.bottone_qr_salva_voto.configure(state="normal")
+
+        file_cartello = profilo.get("file_cartello")
+        if file_cartello and Path(file_cartello).is_file():
+            self._percorso_ultimo_cartello = file_cartello
+
+    def _elimina_profilo_qr_selezionato(self):
+        profilo = self._profilo_qr_selezionato()
+        if profilo is None:
+            return
+        if not messagebox.askyesno(
+            self._t("ms_qr_conferma_elimina_titolo"), self._t("ms_qr_conferma_elimina_testo", nome=profilo["nome"]),
+        ):
+            return
+
+        cartella_profilo = CARTELLA_QR_PROFILI / self._nome_cartella_sicuro(profilo["nome"])
+        shutil.rmtree(cartella_profilo, ignore_errors=True)
+
+        profili = [p for p in self._leggi_profili_qr() if p["nome"] != profilo["nome"]]
+        self._scrivi_profili_qr(profili)
+        self._aggiorna_lista_profili_qr()
 
     def _salva_dati_qrcode(self):
         parser = carica_parser()
@@ -3045,6 +3497,9 @@ class ManagerShow(tk.Tk):
         parser[SEZIONE_QRCODE]["Password"] = self.var_qr_password.get()
         parser[SEZIONE_QRCODE]["Sicurezza"] = self._chiave_da_etichetta_qr_sicurezza(self.var_qr_sicurezza_display.get())
         parser[SEZIONE_QRCODE]["Ip"] = self.var_qr_ip.get().strip()
+        parser[SEZIONE_QRCODE]["Cartello_Titolo"] = self.var_qr_cartello_titolo.get().strip()
+        parser[SEZIONE_QRCODE]["Cartello_Sottotitolo"] = self.var_qr_cartello_sottotitolo.get().strip()
+        parser[SEZIONE_QRCODE]["Cartello_Includi_Voto"] = str(self.var_qr_cartello_includi_voto.get())
         salva_parser(parser)
 
     def _genera_qrcode(self):
@@ -3118,6 +3573,214 @@ class ManagerShow(tk.Tk):
             return
         immagine.save(percorso)
         messagebox.showinfo(self._t("ms_qr_salva_titolo"), self._t("ms_qr_salvato_testo", percorso=percorso))
+
+    @staticmethod
+    def _carica_font_cartello(dimensione: int, grassetto: bool = False):
+        """Font di sistema per il cartello stampabile - percorso esplicito
+        nella cartella Fonts di Windows (ImageFont.truetype non cerca lì
+        da solo se non gli si passa un percorso assoluto). Se non trovato
+        ripiega sul font bitmap di default di Pillow: meno bello ma non
+        fa mai fallire la generazione."""
+        from PIL import ImageFont
+        cartella_font = Path(os.environ.get("WINDIR", "C:\\Windows")) / "Fonts"
+        nomi = (["arialbd.ttf"] if grassetto else []) + ["arial.ttf"]
+        for nome in nomi:
+            percorso_font = cartella_font / nome
+            if percorso_font.is_file():
+                try:
+                    return ImageFont.truetype(str(percorso_font), dimensione)
+                except OSError:
+                    continue
+        return ImageFont.load_default()
+
+    @staticmethod
+    def _ritaglia_bordo_qr(immagine):
+        """Il QR generato ha un bordo bianco 'quiet zone' incorporato
+        nell'immagine (richiesto dallo standard, utile perche' le
+        fotocamere lo leggano bene da soli) - ma per il cartello, dove
+        c'e' gia' testo intorno, e' solo spazio vuoto in piu' da
+        togliere per avvicinare il testo al QR."""
+        from PIL import ImageOps
+        bbox = ImageOps.invert(immagine.convert("L")).getbbox()
+        return immagine.crop(bbox) if bbox else immagine
+
+    def _crea_cartello_qr(self, titolo: str, sottotitolo: str, ssid: str, password: str, includi_voto: bool):
+        from PIL import Image, ImageDraw
+
+        larghezza = 1240
+        dimensione_qr = 480
+        # Altezza generosa, si ritaglia alla fine in base a dove finisce
+        # davvero il contenuto (vedi crop finale) - cosi' non si rischia
+        # piu' di tagliare via il secondo QR per un calcolo sbagliato.
+        altezza_massima = 2000
+
+        cartello = Image.new("RGB", (larghezza, altezza_massima), "white")
+        disegno = ImageDraw.Draw(cartello)
+
+        font_titolo = self._carica_font_cartello(52, grassetto=True)
+        font_sottotitolo = self._carica_font_cartello(28)
+        font_passo = self._carica_font_cartello(34, grassetto=True)
+        font_testo = self._carica_font_cartello(28)
+        font_nota = self._carica_font_cartello(22)
+
+        def centra_testo(y, testo, font, riempimento="black"):
+            larghezza_testo = disegno.textlength(testo, font=font)
+            disegno.text(((larghezza - larghezza_testo) / 2, y), testo, font=font, fill=riempimento)
+            return y
+
+        y = 40
+        centra_testo(y, titolo, font_titolo)
+        y += 66
+        if sottotitolo:
+            centra_testo(y, sottotitolo, font_sottotitolo, riempimento="#444")
+            y += 50
+        else:
+            y += 10
+
+        centra_testo(y, self._t("ms_qr_cartello_passo1"), font_passo)
+        y += 50
+        qr_wifi = self._ritaglia_bordo_qr(self.qr_wifi_immagine_pil).resize((dimensione_qr, dimensione_qr))
+        cartello.paste(qr_wifi, ((larghezza - dimensione_qr) // 2, y))
+        y += dimensione_qr + 4
+        centra_testo(y, self._t("ms_qr_cartello_rete", rete=ssid), font_testo)
+        y += 36
+        centra_testo(y, self._t("ms_qr_cartello_password", password=password), font_testo)
+        y += 36
+        centra_testo(y, self._t("ms_qr_cartello_nota_wifi"), font_nota, riempimento="#555")
+        y += 90
+
+        if includi_voto:
+            centra_testo(y, self._t("ms_qr_cartello_passo2"), font_passo)
+            y += 50
+            qr_voto = self._ritaglia_bordo_qr(self.qr_voto_immagine_pil).resize((dimensione_qr, dimensione_qr))
+            cartello.paste(qr_voto, ((larghezza - dimensione_qr) // 2, y))
+            y += dimensione_qr + 4
+            centra_testo(y, self._t("ms_qr_cartello_nota_voto"), font_nota, riempimento="#555")
+            y += 30
+
+        return cartello.crop((0, 0, larghezza, min(y + 40, altezza_massima)))
+
+    def _genera_cartello_stampabile(self):
+        includi_voto = self.var_qr_cartello_includi_voto.get()
+        if self.qr_wifi_immagine_pil is None or (includi_voto and self.qr_voto_immagine_pil is None):
+            messagebox.showerror(self._t("ms_qr_errore_genera_prima_titolo"), self._t("ms_qr_errore_genera_prima_testo"))
+            return
+
+        titolo = self.var_qr_cartello_titolo.get().strip() or self.var_qr_ssid.get().strip()
+        sottotitolo = self.var_qr_cartello_sottotitolo.get().strip()
+        cartello = self._crea_cartello_qr(
+            titolo, sottotitolo, self.var_qr_ssid.get().strip(), self.var_qr_password.get(), includi_voto,
+        )
+
+        self._salva_dati_qrcode()
+
+        # Anteprima prima di chiedere dove salvare: si apre con il
+        # visualizzatore immagini di Windows, cosi' si controlla il
+        # risultato prima di scegliere la posizione definitiva.
+        percorso_anteprima = Path(tempfile.gettempdir()) / f"anteprima_cartello_{secrets.token_hex(4)}.png"
+        cartello.save(percorso_anteprima, dpi=(150, 150))
+        self._percorso_ultimo_cartello = percorso_anteprima
+        try:
+            os.startfile(percorso_anteprima)
+        except OSError:
+            pass
+
+        if not messagebox.askyesno(self._t("ms_qr_cartello_anteprima_titolo"), self._t("ms_qr_cartello_anteprima_testo")):
+            return
+
+        nome_suggerito = f"cartello_{self._nome_cartella_sicuro(self.var_qr_ssid.get().strip())}.png"
+        percorso = filedialog.asksaveasfilename(
+            title=self._t("ms_qr_salva_titolo"), defaultextension=".png", initialfile=nome_suggerito,
+            filetypes=[("PNG", "*.png")],
+        )
+        if not percorso:
+            return
+        cartello.save(percorso, dpi=(150, 150))
+        self._percorso_ultimo_cartello = percorso
+        messagebox.showinfo(self._t("ms_qr_salva_titolo"), self._t("ms_qr_cartello_salvato_testo", percorso=percorso))
+
+    def _stampa_cartello(self):
+        """Manda il cartello direttamente alla stampante predefinita via
+        GDI (win32print/win32ui), invece del verbo di stampa diretto di
+        Windows: quello richiama una vecchia finestra di sistema
+        (shimgvw.dll) nota per dare "errore interno" in modo
+        intermittente. Qui non passiamo da nessuna finestra esterna
+        fragile - solo la vera API di stampa di Windows."""
+        if not self._percorso_ultimo_cartello or not Path(self._percorso_ultimo_cartello).is_file():
+            messagebox.showerror(self._t("ms_qr_errore_genera_prima_titolo"), self._t("ms_qr_errore_genera_prima_testo"))
+            return
+
+        try:
+            import win32print
+            import win32ui
+            import win32con
+            from PIL import Image, ImageWin
+        except ImportError:
+            vuole_installare = messagebox.askyesno(
+                self._t("ms_qr_dipendenza_mancante_titolo"), self._t("ms_qr_dipendenza_stampa_mancante_testo"),
+            )
+            if vuole_installare:
+                risultato = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "pywin32"], capture_output=True, text=True,
+                )
+                if risultato.returncode == 0:
+                    messagebox.showinfo(
+                        self._t("gc_installazione_riuscita_titolo"), self._t("ms_qr_dipendenza_installata_testo"),
+                    )
+                else:
+                    messagebox.showerror(
+                        self._t("gc_installazione_fallita_titolo"),
+                        self._t("gc_installazione_fallita_testo", errore=risultato.stderr[-500:]),
+                    )
+            return
+
+        try:
+            nome_stampante = win32print.GetDefaultPrinter()
+        except Exception as errore:  # noqa: BLE001 - qualunque problema qui, meglio un messaggio chiaro che un crash
+            messagebox.showerror(self._t("gc_errore_titolo"), str(errore))
+            return
+
+        # Anteprima visiva prima di chiedere conferma: utile sia dopo
+        # "Genera" (per ricontrollare) sia quando si carica un profilo
+        # gia' pronto (dove non si e' appena visto nulla).
+        try:
+            os.startfile(self._percorso_ultimo_cartello)
+        except OSError:
+            pass
+
+        if not messagebox.askyesno(
+            self._t("ms_qr_conferma_stampa_titolo"), self._t("ms_qr_conferma_stampa_testo", stampante=nome_stampante),
+        ):
+            return
+
+        dc_stampante = None
+        try:
+            immagine = Image.open(self._percorso_ultimo_cartello).convert("RGB")
+
+            dc_stampante = win32ui.CreateDC()
+            dc_stampante.CreatePrinterDC(nome_stampante)
+
+            larghezza_pagina = dc_stampante.GetDeviceCaps(win32con.HORZRES)
+            altezza_pagina = dc_stampante.GetDeviceCaps(win32con.VERTRES)
+            scala = min(larghezza_pagina / immagine.width, altezza_pagina / immagine.height)
+            larghezza_stampa = int(immagine.width * scala)
+            altezza_stampa = int(immagine.height * scala)
+            x = (larghezza_pagina - larghezza_stampa) // 2
+            y = (altezza_pagina - altezza_stampa) // 2
+
+            dc_stampante.StartDoc(self._t("ms_qr_titolo_cartello"))
+            dc_stampante.StartPage()
+            ImageWin.Dib(immagine).draw(dc_stampante.GetHandleOutput(), (x, y, x + larghezza_stampa, y + altezza_stampa))
+            dc_stampante.EndPage()
+            dc_stampante.EndDoc()
+        except Exception as errore:  # noqa: BLE001 - stampanti/driver diversi possono fallire in tanti modi diversi
+            messagebox.showerror(self._t("gc_errore_titolo"), str(errore))
+            return
+        finally:
+            if dc_stampante is not None:
+                dc_stampante.DeleteDC()
+
+        messagebox.showinfo(self._t("ms_qr_stampa_titolo"), self._t("ms_qr_stampa_inviata_testo", stampante=nome_stampante))
 
     # ------------------------------------------------------------------
     # Scheda Storico (database SQLite scritto da VotoShow.py: voti e
